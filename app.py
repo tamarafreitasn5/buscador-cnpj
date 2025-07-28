@@ -105,7 +105,8 @@ if cnpj_input:
         st.dataframe(df_total[[coluna_cnpj, 'Planilha', 'Aba']].drop_duplicates())
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
-        
+
+        # Mapeamento de possíveis nomes de colunas para cada campo fixo
         aliases_colunas = {
             'CNPJ': ['cnpj'],
             'Razão Social': ['razão social', 'razao social', 'nome da empresa', 'empresa', 'nome empresa'],
@@ -118,23 +119,35 @@ if cnpj_input:
             'Setor/Área': ['setor', 'área', 'area', 'segmento', 'segmentação']
         }
 
-        cols_lower = {col.lower(): col for col in resultado.columns}
+        # Normaliza os nomes das colunas do DataFrame para lowercase sem espaços/acento para facilitar busca
+        def normaliza_col(col):
+            return re.sub(r'[^a-z0-9]', '', col.lower())
+
+        colunas_normalizadas = {normaliza_col(c): c for c in resultado.columns}
+
         dados_exibicao = pd.DataFrame()
 
         for col_fixa, possiveis_nomes in aliases_colunas.items():
             encontrada = False
             for nome_possivel in possiveis_nomes:
-                if nome_possivel in cols_lower:
-                    # Força string, tira espaços em branco nas extremidades
-                    dados_exibicao[col_fixa] = resultado[cols_lower[nome_possivel]].astype(str).str.strip()
+                nome_norm = normaliza_col(nome_possivel)
+                if nome_norm in colunas_normalizadas:
+                    # Pega a coluna original do DataFrame pelo nome normalizado
+                    col_real = colunas_normalizadas[nome_norm]
+                    dados_exibicao[col_fixa] = resultado[col_real]
                     encontrada = True
                     break
             if not encontrada:
                 dados_exibicao[col_fixa] = ""  # cria coluna vazia se não achou
 
-        dados_exibicao['Planilha'] = resultado['Planilha'].astype(str).str.strip()
-        dados_exibicao['Aba'] = resultado['Aba'].astype(str).str.strip()
+        # Garante que "Planilha" e "Aba" estejam no resultado
+        for col in ['Planilha', 'Aba']:
+            if col in resultado.columns:
+                dados_exibicao[col] = resultado[col]
+            else:
+                dados_exibicao[col] = ""
 
+        # Ordem final das colunas, Planilha e Aba sempre no final
         colunas_finais = ['CNPJ', 'Razão Social', 'Nome', 'Cargo', 'E-mail',
                          'telefone', 'celular', 'contatos adicionais/ notas', 'Setor/Área', 'Planilha', 'Aba']
 
