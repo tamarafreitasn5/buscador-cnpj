@@ -1,6 +1,4 @@
 import streamlit as st
-import pandas as pd
-import json
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
@@ -11,14 +9,11 @@ SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 st.title("Leitor de arquivos do Google Drive")
 
 # --- AUTENTICAÇÃO USANDO OS SECRETS DO STREAMLIT ---
-service_account_info = json.loads(st.secrets["google_service_account"].to_json())
+service_account_info = st.secrets["google_service_account"]
 creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
 
-# --- CONSTRUÇÃO DO SERVIÇO DRIVE ---
-drive_service = build("drive", "v3", credentials=creds)
-
-# --- ID DA PASTA DO DRIVE (pode mudar para o que precisar) ---
-FOLDER_ID = "COLE_AQUI_O_ID_DA_PASTA_DO_DRIVE"
+# --- ID DA PASTA DO DRIVE ---
+FOLDER_ID = "19LsEdkxcp-PfdpL5ZE-PA257u51umlld"
 
 # --- FUNÇÃO PARA BUSCAR OS ARQUIVOS DENTRO DA PASTA ---
 def listar_arquivos(folder_id):
@@ -26,12 +21,15 @@ def listar_arquivos(folder_id):
     results = drive_service.files().list(q=query, fields="files(id, name)").execute()
     return results.get("files", [])
 
+# --- CONSTRUÇÃO DO SERVIÇO DRIVE ---
+drive_service = build("drive", "v3", credentials=creds)
+
 # --- LISTA OS ARQUIVOS E MOSTRA NA INTERFACE ---
 arquivos = listar_arquivos(FOLDER_ID)
-nomes = [arq["name"] for arq in arquivos]
-ids = [arq["id"] for arq in arquivos]
 
 if arquivos:
+    nomes = [arq["name"] for arq in arquivos]
+    ids = [arq["id"] for arq in arquivos]
     escolha = st.selectbox("Selecione um arquivo", nomes)
     arquivo_id = ids[nomes.index(escolha)]
     link = f"https://docs.google.com/spreadsheets/d/{arquivo_id}/edit"
