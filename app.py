@@ -58,8 +58,9 @@ def carregar_planilhas_google_drive(folder_id):
                 
                 df.columns = [str(col).strip() for col in df.columns]
                 
+                # Correção aqui para evitar erro com dtype em DataFrames aninhados
                 for c in df.columns:
-                    if df[c].dtype == 'object':
+                    if isinstance(df[c], pd.Series) and df[c].dtype == 'object':
                         df[c] = df[c].astype(str).str.strip().replace({'': pd.NA, 'nan': pd.NA})
 
                 df['Planilha'] = arquivo['name']
@@ -107,7 +108,6 @@ if cnpj_input:
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
 
-        # Dicionário com possíveis nomes para cada coluna (com maiúsculas, minúsculas e variantes)
         aliases_colunas = {
             "CNPJ": ["CNPJ", "cnpj", "CNPJ_LIMPO", "cnpj_limpo"],
             "Razão Social": ["Razão Social", "RAZÃO SOCIAL", "razao social", "razaosocial", "empresa", "nomeempresa"],
@@ -124,7 +124,6 @@ if cnpj_input:
 
         dados_exibicao = pd.DataFrame()
 
-        # Pra cada coluna desejada, tenta encontrar uma correspondência exata no resultado.columns e traz os dados
         for nome_col, possiveis_nomes in aliases_colunas.items():
             coluna_encontrada = None
             for nome in possiveis_nomes:
