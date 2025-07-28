@@ -4,7 +4,6 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import pandas as pd
 import re
-import unidecode
 
 st.set_page_config(page_title="Consulta por CNPJ", layout="wide")
 st.title("🔍 Consulta de Contatos por CNPJ (Google Drive)")
@@ -71,9 +70,6 @@ def carregar_planilhas_google_drive(folder_id):
             st.warning(f"Erro ao ler arquivo {arquivo['name']}: {e}")
     return df_total
 
-def normalizar_coluna(nome):
-    return unidecode.unidecode(nome.lower().strip().replace(" ", "").replace("_",""))
-
 folder_id = get_folder_id_by_name(FOLDER_NAME)
 
 if folder_id is None:
@@ -88,7 +84,6 @@ if df_total.empty:
     st.warning("Nenhuma planilha válida encontrada na pasta.")
     st.stop()
 
-# Seleciona coluna que contém CNPJ (mantido igual)
 colunas_possiveis = [col for col in df_total.columns if 'cnpj' in col.lower()]
 if not colunas_possiveis:
     st.error("Nenhuma coluna com CNPJ encontrada nas planilhas.")
@@ -112,36 +107,35 @@ if cnpj_input:
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
 
+        # Dicionário com possíveis nomes para cada coluna (com maiúsculas, minúsculas e variantes)
         aliases_colunas = {
-            "CNPJ": ["cnpj", "CNPJ", "cnpj_limpo", "CNPJ_LIMPO"],
-            "Razão Social": ["razao social", "razão social", "nome da empresa", "empresa", "nomeempresa", "razaosocial", "RAZÃO SOCIAL"],
-            "Nome": ["nome", "nome contato", "contato", "nomecontato", "NOME"],
-            "Cargo": ["cargo", "posição", "posicao", "função", "funcao", "cargo/função", "CARGO"],
-            "E-mail": ["e-mail", "email", "e mail", "E-MAIL", "EMAIL"],
-            "Telefone": ["telefone", "tel", "telefonefixo", "telefoneresidencial", "TELEFONE"],
-            "Celular": ["celular", "telefonecelular", "whatsapp", "cel", "CELULAR"],
-            "Contatos adicionais/notas": ["contatos adicionais", "notas", "observacoes", "observações", "comentarios", "comentários", "contatosadicionais", "notas/observações"],
-            "Setor/Área": ["setor", "área", "area", "segmento", "segmentacao", "setor/area", "SETOR/ÁREA"],
-            "Planilha": ["planilha"],
-            "Aba": ["aba"]
+            "CNPJ": ["CNPJ", "cnpj", "CNPJ_LIMPO", "cnpj_limpo"],
+            "Razão Social": ["Razão Social", "RAZÃO SOCIAL", "razao social", "razaosocial", "empresa", "nomeempresa"],
+            "Nome": ["Nome", "NOME", "nome", "nome contato", "contato", "nomecontato"],
+            "Cargo": ["Cargo", "CARGO", "cargo", "posição", "posicao", "função", "funcao", "cargo/função"],
+            "E-mail": ["E-mail", "EMAIL", "email", "e-mail", "e mail"],
+            "Telefone": ["Telefone", "TELEFONE", "telefone", "tel", "telefonefixo", "telefoneresidencial"],
+            "Celular": ["Celular", "CELULAR", "celular", "telefonecelular", "whatsapp", "cel"],
+            "Contatos adicionais/notas": ["Contatos adicionais/notas", "Contatos adicionais", "notas", "Notas", "observacoes", "observações", "comentarios", "comentários", "contatosadicionais", "notas/observações"],
+            "Setor/Área": ["Setor/Área", "SETOR/ÁREA", "Setor", "Área", "area", "segmento", "segmentacao"],
+            "Planilha": ["Planilha"],
+            "Aba": ["Aba"]
         }
-
-        cols_norm = {normalizar_coluna(c): c for c in resultado.columns}
 
         dados_exibicao = pd.DataFrame()
 
-        for nome_col, lista_alias in aliases_colunas.items():
-            achou = False
-            for alias in lista_alias:
-                alias_norm = normalizar_coluna(alias)
-                if alias_norm in cols_norm:
-                    dados_exibicao[nome_col] = resultado[cols_norm[alias_norm]]
-                    achou = True
+        # Pra cada coluna desejada, tenta encontrar uma correspondência exata no resultado.columns e traz os dados
+        for nome_col, possiveis_nomes in aliases_colunas.items():
+            coluna_encontrada = None
+            for nome in possiveis_nomes:
+                if nome in resultado.columns:
+                    coluna_encontrada = nome
                     break
-            if not achou:
-                dados_exibicao[nome_col] = ""  # cria coluna vazia se não achar
+            if coluna_encontrada:
+                dados_exibicao[nome_col] = resultado[coluna_encontrada].fillna("")
+            else:
+                dados_exibicao[nome_col] = ""
 
-        dados_exibicao = dados_exibicao.fillna("")
         st.dataframe(dados_exibicao, use_container_width=True)
 
 else:
