@@ -82,7 +82,7 @@ if df_total.empty:
     st.warning("Nenhuma planilha válida encontrada na pasta.")
     st.stop()
 
-# Seleciona coluna que contém CNPJ
+# Seleciona coluna que contém CNPJ (mantido exatamente igual)
 colunas_possiveis = [col for col in df_total.columns if 'cnpj' in col.lower()]
 if not colunas_possiveis:
     st.error("Nenhuma coluna com CNPJ encontrada nas planilhas.")
@@ -106,17 +106,17 @@ if cnpj_input:
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
 
-        # Dicionário de alias para cada coluna desejada
+        # Dicionário atualizado com TODAS as variações que você passou:
         aliases_colunas = {
-            "CNPJ": ["cnpj"],
-            "Razão Social": ["razao social", "razão social", "nome da empresa", "empresa", "nomeempresa", "razaosocial"],
-            "Nome": ["nome", "nome contato", "contato", "nomecontato"],
-            "Cargo": ["cargo", "posição", "posicao", "função", "funcao", "cargo/função"],
-            "E-mail": ["e-mail", "email", "e mail"],
-            "Telefone": ["telefone", "tel", "telefonefixo", "telefoneresidencial"],
-            "Celular": ["celular", "telefonecelular", "whatsapp", "cel"],
+            "CNPJ": ["cnpj", "cnpj_limpo"],
+            "Razão Social": ["razao social", "razão social", "razaosocial", "razão_social", "razao_social", "RAZÃO SOCIAL", "RAZÃO_SOCIAL", "RAZAO SOCIAL", "razao social", "razao_social", "razao social"],
+            "Nome": ["nome", "nome contato", "contato", "nomecontato", "NOME"],
+            "Cargo": ["cargo", "posição", "posicao", "função", "funcao", "cargo/função", "CARGO"],
+            "E-mail": ["e-mail", "email", "e mail", "E-MAIL", "EMAIL"],
+            "Telefone": ["telefone", "tel", "telefonefixo", "telefoneresidencial", "TELEFONE"],
+            "Celular": ["celular", "telefonecelular", "whatsapp", "cel", "CELULAR"],
             "Contatos adicionais/notas": ["contatos adicionais", "notas", "observacoes", "observações", "comentarios", "comentários", "contatosadicionais", "notas/observações"],
-            "Setor/Área": ["setor", "área", "area", "segmento", "segmentacao", "setor/area"],
+            "Setor/Área": ["setor", "área", "area", "segmento", "segmentacao", "setor/area", "SETOR/ÁREA"],
             "Planilha": ["planilha"],
             "Aba": ["aba"]
         }
@@ -135,7 +135,7 @@ if cnpj_input:
                     achou = True
                     break
             if not achou:
-                dados_exibicao[nome_col] = ""  # se não achar a coluna, cria vazia
+                dados_exibicao[nome_col] = ""  # cria coluna vazia se não achar
 
         st.dataframe(dados_exibicao, use_container_width=True)
 
