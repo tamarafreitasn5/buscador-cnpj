@@ -4,7 +4,6 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import pandas as pd
 import re
-import unidecode
 
 st.set_page_config(page_title="Consulta por CNPJ", layout="wide")
 st.title("🔍 Consulta de Contatos por CNPJ (Google Drive)")
@@ -52,26 +51,29 @@ def carregar_planilhas_google_drive(folder_id):
                 valores = aba.get_all_values()
                 if not valores or len(valores) < 2:
                     continue
-                # Cabeçalho na linha 2 (index 1)
-                header = valores[1]
-                dados = valores[2:]  # dados a partir da linha 3
+                header = valores[1]  # Cabeçalho linha 2
+                dados = valores[2:]  # Dados a partir da linha 3
+
                 df = pd.DataFrame(dados, columns=header)
-                # Limpa espaços das colunas
+                
+                # Limpa espaços e caracteres invisíveis nas colunas
                 df.columns = [str(col).strip() for col in df.columns]
-                # Limpa espaços nas células de texto
+                
+                # Limpa espaços e strings vazias nas células
                 for c in df.columns:
                     if df[c].dtype == 'object':
-                        df[c] = df[c].str.strip()
+                        df[c] = df[c].astype(str).str.strip().replace({'': pd.NA, 'nan': pd.NA})
+                
                 df['Planilha'] = arquivo['name']
                 df['Aba'] = aba.title
+
+                st.write(f"Planilha: {arquivo['name']} - Aba: {aba.title} - Exemplo:")
+                st.dataframe(df.head(3))
+
                 df_total = pd.concat([df_total, df], ignore_index=True)
         except Exception as e:
             st.warning(f"Erro ao ler arquivo {arquivo['name']}: {e}")
     return df_total
-
-def normalizar_coluna(nome):
-    # Remove acentos, deixa minúsculo e tira espaços e _
-    return unidecode.unidecode(nome.lower().strip().replace(" ", "").replace("_",""))
 
 folder_id = get_folder_id_by_name(FOLDER_NAME)
 
@@ -107,6 +109,9 @@ if cnpj_input:
     cnpj_limpo = limpar_cnpj(cnpj_input)
     resultado = df_total[df_total["CNPJ_LIMPO"].str.contains(cnpj_limpo, na=False)]
 
+    st.write(f"Linhas encontradas para CNPJ '{cnpj_limpo}': {len(resultado)}")
+    st.dataframe(resultado.head(10))
+
     if resultado.empty:
         st.warning("Nenhum contato encontrado com esse CNPJ.")
         st.write("⚠ Verifique se digitou o CNPJ sem pontos ou traços.")
@@ -116,42 +121,30 @@ if cnpj_input:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
 
         aliases_colunas = {
-            "CNPJ": ["cnpj", "cnpj_limpo"],
-            "Razão Social": ["razao social", "razão social", "razaosocial", "razao_social", "razão_social", "razão social", "RAZÃO SOCIAL", "RAZAO SOCIAL", "RAZÃO_SOCIAL"],
-            "Nome": ["nome", "nome contato", "contato", "nomecontato", "NOME"],
-            "Cargo": ["cargo", "posição", "posicao", "função", "funcao", "cargo/função", "CARGO"],
-            "E-mail": ["e-mail", "email", "e mail", "E-MAIL", "EMAIL"],
-            "Telefone": ["telefone", "tel", "telefonefixo", "telefoneresidencial", "TELEFONE"],
-            "Celular": ["celular", "telefonecelular", "whatsapp", "cel", "CELULAR"],
-            "Contatos adicionais/notas": ["contatos adicionais", "notas", "observacoes", "observações", "comentarios", "comentários", "contatosadicionais", "notas/observações"],
-            "Setor/Área": ["setor", "área", "area", "segmento", "segmentacao", "setor/area", "SETOR/ÁREA"],
-            "Planilha": ["planilha"],
-            "Aba": ["aba"]
+            "Razão Social": ["Razão Social", "RAZÃO SOCIAL", "razao social", "razaosocial"],
+            "Nome": ["Nome", "NOME", "nome"],
+            "Cargo": ["Cargo", "CARGO", "cargo"],
+            "E-mail": ["E-mail", "EMAIL", "email", "e-mail"],
+            "Telefone": ["Telefone", "TELEFONE", "telefone"],
+            "Celular": ["Celular", "CELULAR", "celular"],
+            "Contatos adicionais/notas": ["Contatos adicionais/notas", "Contatos adicionais", "notas", "Notas"],
+            "Setor/Área": ["Setor/Área", "Setor", "Área", "area", "setor/area"],
+            "Planilha": ["Planilha"],
+            "Aba": ["Aba"]
         }
 
-        cols_norm = {normalizar_coluna(c): c for c in resultado.columns}
-
         dados_exibicao = pd.DataFrame()
-
-        for nome_col, lista_alias in aliases_colunas.items():
-            achou = False
-            for alias in lista_alias:
-                alias_norm = normalizar_coluna(alias)
-                # Busca alias dentro do nome da coluna normalizada
-                for col_norm, col_original in cols_norm.items():
-                    if alias_norm in col_norm:
-                        dados_exibicao[nome_col] = resultado[col_original].astype(str)
-                        achou = True
-                        break
-                if achou:
+        for nome_col, possiveis_nomes in aliases_colunas.items():
+            encontrada = False
+            for nome in possiveis_nomes:
+                if nome in resultado.columns:
+                    dados_exibicao[nome_col] = resultado[nome].astype(str).fillna("")
+                    encontrada = True
                     break
-            if not achou:
+            if not encontrada:
                 dados_exibicao[nome_col] = ""
-                st.warning(f"Coluna para '{nome_col}' não encontrada. Procurado aliases: {lista_alias}")
-            else:
-                st.write(f"Coluna para '{nome_col}' encontrada.")
 
+        dados_exibicao = dados_exibicao.fillna("")
         st.dataframe(dados_exibicao, use_container_width=True)
-
 else:
     st.info("Digite o CNPJ para buscar os contatos.")
