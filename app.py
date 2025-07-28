@@ -1,124 +1,135 @@
 import streamlit as st
 import pandas as pd
+import io
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-import io
-from googleapiclient.http import MediaIoBaseDownload
 
-# Autenticação
+# Autenticação com st.secrets
 credentials = service_account.Credentials.from_service_account_info(
     st.secrets["gcp_service_account"],
-    scopes=["https://www.googleapis.com/auth/drive"]
+    scopes=["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/spreadsheets.readonly"]
 )
-drive_service = build("drive", "v3", credentials=credentials)
-sheets_service = build("sheets", "v4", credentials=credentials)
 
-# Nome da pasta no Drive
-FOLDER_ID = "19LsEdkxcp-PfdpL5ZE-PA257u51umlld"
+# ID da pasta no Google Drive (você pode pegar esse ID da URL da pasta)
+FOLDER_NAME = "Base teste"
+DRIVE_SERVICE = build("drive", "v3", credentials=credentials)
+SHEETS_SERVICE = build("sheets", "v4", credentials=credentials)
 
-# Mapeamento de possíveis nomes de colunas
-COLUMN_MAP = {
-    "cnpj": "CNPJ",
-    "razão social": "Razão Social",
-    "razao social": "Razão Social",
-    "nome da empresa": "Razão Social",
-    "nome": "Nome",
-    "cargo": "Cargo",
-    "e-mail": "E-mail",
-    "email": "E-mail",
-    "telefone": "Telefone",
-    "celular": "Celular",
-    "contatos adicionais": "Contatos adicionais/Notas",
-    "notas": "Contatos adicionais/Notas",
-    "setor": "Setor/Área",
-    "área": "Setor/Área",
-    "area": "Setor/Área",
-}
+# Função para encontrar o ID da pasta pelo nome
+def get_folder_id_by_name(name):
+    results = DRIVE_SERVICE.files().list(q=f"mimeType='application/vnd.google-apps.folder' and name='{name}'",
+                                         fields="files(id)").execute()
+    folders = results.get("files", [])
+    if folders:
+        return folders[0]["id"]
+    return None
 
-def padronizar_colunas(df):
-    new_columns = {}
-    for col in df.columns:
-        nome_original = col.strip().lower()
-        if nome_original in COLUMN_MAP:
-            new_columns[col] = COLUMN_MAP[nome_original]
-    return df.rename(columns=new_columns)
-
-def get_google_sheets_files(folder_id):
+# Função para listar arquivos na pasta
+def list_files_in_folder(folder_id):
     query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.spreadsheet'"
-    response = drive_service.files().list(q=query, fields="files(id, name)").execute()
-    return response.get("files", [])
+    results = DRIVE_SERVICE.files().list(q=query, fields="files(id, name)").execute()
+    return results.get("files", [])
 
-def get_sheet_data(file_id, sheet_name):
-    try:
-        result = sheets_service.spreadsheets().values().get(
-            spreadsheetId=file_id,
-            range=sheet_name
-        ).execute()
-        values = result.get("values", [])
-        if not values:
-            return pd.DataFrame()
-        df = pd.DataFrame(values[1:], columns=values[0])
-        df = padronizar_colunas(df)
-        return df
-    except Exception:
-        return pd.DataFrame()
+# Padronização de nomes de colunas (tolerante a maiúsculas, minúsculas, acentos, variações etc.)
+def padronizar_nome(col):
+    col = col.strip().lower()
+    col = col.replace("razão social", "razao social")
+    if "cnpj" in col:
+        return "CNPJ"
+    elif "razao" in col and "social" in col:
+        return "Razão Social"
+    elif "nome" in col and "empresa" in col:
+        return "Razão Social"
+    elif col in ["nome", "contato", "responsavel"]:
+        return "Nome"
+    elif "cargo" in col:
+        return "Cargo"
+    elif "email" in col:
+        return "E-mail"
+    elif "telefone" in col and "cel" in col:
+        return "Celular"
+    elif "telefone" in col:
+        return "Telefone"
+    elif "celular" in col:
+        return "Celular"
+    elif "nota" in col or "adicional" in col:
+        return "Contatos adicionais/Notas"
+    elif "setor" in col or "área" in col or "area" in col:
+        return "Setor/Área"
+    else:
+        return col  # mantém original se não for reconhecido
 
-def get_sheet_names(file_id):
-    try:
-        sheet_metadata = sheets_service.spreadsheets().get(spreadsheetId=file_id).execute()
-        return [s["properties"]["title"] for s in sheet_metadata["sheets"]]
-    except Exception:
-        return []
-
+# Função para buscar dados nas planilhas
 def buscar_dados_por_cnpj(cnpj_input):
-    arquivos = get_google_sheets_files(FOLDER_ID)
+    folder_id = get_folder_id_by_name(FOLDER_NAME)
+    arquivos = list_files_in_folder(folder_id)
     resultados = []
 
     for arquivo in arquivos:
-        sheet_id = arquivo["id"]
-        sheet_nome = arquivo["name"]
-        abas = get_sheet_names(sheet_id)
+        spreadsheet_id = arquivo["id"]
+        nome_arquivo = arquivo["name"]
+
+        # Lista as abas da planilha
+        sheets_metadata = SHEETS_SERVICE.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+        abas = sheets_metadata["sheets"]
 
         for aba in abas:
-            df = get_sheet_data(sheet_id, aba)
-            if "CNPJ" not in df.columns:
-                continue
+            nome_aba = aba["properties"]["title"]
+            try:
+                dados = SHEETS_SERVICE.spreadsheets().values().get(
+                    spreadsheetId=spreadsheet_id,
+                    range=f"'{nome_aba}'"
+                ).execute()
 
-            df["CNPJ"] = df["CNPJ"].astype(str).str.replace(r'\D', '', regex=True)
-            cnpj_formatado = cnpj_input.replace(".", "").replace("/", "").replace("-", "")
-            df_filtrado = df[df["CNPJ"].str.contains(cnpj_formatado, na=False)]
+                valores = dados.get("values", [])
+                if not valores:
+                    continue
 
-            if not df_filtrado.empty:
-                df_filtrado["Planilha"] = sheet_nome
-                df_filtrado["Aba"] = aba
-                resultados.append(df_filtrado)
+                df = pd.DataFrame(valores[1:], columns=valores[0])
+
+                # Padroniza os nomes das colunas
+                df.columns = [padronizar_nome(c) for c in df.columns]
+
+                # Normaliza o CNPJ para buscar
+                df["CNPJ"] = df["CNPJ"].astype(str).str.replace(r"\D", "", regex=True)
+                cnpj_input_limpo = cnpj_input.strip().replace(".", "").replace("/", "").replace("-", "")
+
+                df_filtrado = df[df["CNPJ"].str.contains(cnpj_input_limpo, na=False, case=False)]
+
+                if not df_filtrado.empty:
+                    df_filtrado["Planilha"] = nome_arquivo
+                    df_filtrado["Aba"] = nome_aba
+                    resultados.append(df_filtrado)
+
+            except Exception as e:
+                print(f"Erro na aba {nome_aba} da planilha {nome_arquivo}: {e}")
 
     if resultados:
-        resultado_final = pd.concat(resultados, ignore_index=True)
-        colunas_finais = ['CNPJ', 'Razão Social', 'Nome', 'Cargo', 'E-mail', 'Telefone', 'Celular',
-                          'Contatos adicionais/Notas', 'Setor/Área', 'Planilha', 'Aba']
-        for col in colunas_finais:
-            if col not in resultado_final.columns:
-                resultado_final[col] = ""
-        return resultado_final[colunas_finais]
+        df_resultado = pd.concat(resultados, ignore_index=True)
+        colunas_desejadas = ["CNPJ", "Razão Social", "Nome", "Cargo", "E-mail", "Telefone", "Celular",
+                             "Contatos adicionais/Notas", "Setor/Área", "Planilha", "Aba"]
+
+        for col in colunas_desejadas:
+            if col not in df_resultado.columns:
+                df_resultado[col] = ""
+
+        return df_resultado[colunas_desejadas]
     else:
-        return pd.DataFrame(columns=[
-            'CNPJ', 'Razão Social', 'Nome', 'Cargo', 'E-mail', 'Telefone', 'Celular',
-            'Contatos adicionais/Notas', 'Setor/Área', 'Planilha', 'Aba'
-        ])
+        return pd.DataFrame(columns=["CNPJ", "Razão Social", "Nome", "Cargo", "E-mail", "Telefone", "Celular",
+                                     "Contatos adicionais/Notas", "Setor/Área", "Planilha", "Aba"])
 
-# --- INTERFACE STREAMLIT ---
-st.title("🔎 Buscador de CNPJ - Planilhas no Google Drive")
+# Interface Streamlit
+st.title("🔍 Buscador de CNPJ - Planilhas Google Drive")
 
-cnpj_input = st.text_input("Digite o CNPJ (com ou sem pontuação):")
+cnpj_input = st.text_input("Digite o CNPJ para buscar:")
 
-if cnpj_input:
-    resultado = buscar_dados_por_cnpj(cnpj_input)
-
-    if not resultado.empty:
-        st.success(f"{len(resultado)} resultado(s) encontrado(s).")
-        st.dataframe(resultado)
-        csv = resultado.to_csv(index=False).encode('utf-8')
-        st.download_button("⬇️ Baixar resultados em CSV", data=csv, file_name="resultado_cnpj.csv", mime="text/csv")
+if st.button("Buscar"):
+    if not cnpj_input:
+        st.warning("Por favor, digite um CNPJ.")
     else:
-        st.warning("Nenhum dado encontrado para esse CNPJ.")
+        resultado = buscar_dados_por_cnpj(cnpj_input)
+        if resultado.empty:
+            st.error("Nenhum dado encontrado para esse CNPJ.")
+        else:
+            st.success(f"Encontrados {len(resultado)} registros.")
+            st.dataframe(resultado)
