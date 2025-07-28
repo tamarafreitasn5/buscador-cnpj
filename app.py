@@ -105,8 +105,8 @@ if cnpj_input:
         st.dataframe(df_total[[coluna_cnpj, 'Planilha', 'Aba']].drop_duplicates())
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
-
-        # Mapeamento de possíveis nomes de colunas para cada campo fixo
+        
+        # Dicionário com possíveis nomes para cada coluna que queremos trazer
         aliases_colunas = {
             'CNPJ': ['cnpj'],
             'Razão Social': ['razão social', 'razao social', 'nome da empresa', 'empresa', 'nome empresa'],
@@ -119,33 +119,24 @@ if cnpj_input:
             'Setor/Área': ['setor', 'área', 'area', 'segmento', 'segmentação']
         }
 
-        # Normaliza os nomes das colunas do DataFrame para lowercase sem espaços/acento para facilitar busca
-        def normaliza_col(col):
-            return re.sub(r'[^a-z0-9]', '', col.lower())
-
-        colunas_normalizadas = {normaliza_col(c): c for c in resultado.columns}
+        # Cria um mapeamento para encontrar as colunas do dataframe ignorando case
+        cols_lower = {col.lower(): col for col in resultado.columns}
 
         dados_exibicao = pd.DataFrame()
 
         for col_fixa, possiveis_nomes in aliases_colunas.items():
             encontrada = False
             for nome_possivel in possiveis_nomes:
-                nome_norm = normaliza_col(nome_possivel)
-                if nome_norm in colunas_normalizadas:
-                    # Pega a coluna original do DataFrame pelo nome normalizado
-                    col_real = colunas_normalizadas[nome_norm]
-                    dados_exibicao[col_fixa] = resultado[col_real]
+                if nome_possivel in cols_lower:
+                    dados_exibicao[col_fixa] = resultado[cols_lower[nome_possivel]]
                     encontrada = True
                     break
             if not encontrada:
                 dados_exibicao[col_fixa] = ""  # cria coluna vazia se não achou
 
-        # Garante que "Planilha" e "Aba" estejam no resultado
-        for col in ['Planilha', 'Aba']:
-            if col in resultado.columns:
-                dados_exibicao[col] = resultado[col]
-            else:
-                dados_exibicao[col] = ""
+        # Planilha e Aba sempre aparecem
+        dados_exibicao['Planilha'] = resultado['Planilha']
+        dados_exibicao['Aba'] = resultado['Aba']
 
         # Ordem final das colunas, Planilha e Aba sempre no final
         colunas_finais = ['CNPJ', 'Razão Social', 'Nome', 'Cargo', 'E-mail',
@@ -154,5 +145,6 @@ if cnpj_input:
         dados_exibicao = dados_exibicao[colunas_finais]
 
         st.dataframe(dados_exibicao, use_container_width=True)
+
 else:
     st.info("Digite o CNPJ para buscar os contatos.")
