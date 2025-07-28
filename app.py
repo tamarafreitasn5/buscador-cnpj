@@ -16,7 +16,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly"
 ]
 
-# AUTENTICAÇÃO usando st.secrets
+# AUTENTICAÇÃO usando st.secrets, substituindo o credentials.json
 service_account_info = st.secrets["google_service_account"]
 creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
 gc = gspread.authorize(creds)
@@ -54,6 +54,7 @@ def carregar_planilhas_google_drive(folder_id):
                 # Cabeçalho na linha 2 (index 1)
                 header = valores[1]
                 dados = valores[2:]  # dados a partir da linha 3
+                # Monta DataFrame
                 df = pd.DataFrame(dados, columns=header)
                 df.columns = [str(col).strip() for col in df.columns]
                 df['Planilha'] = arquivo['name']
@@ -93,6 +94,8 @@ cnpj_input = st.text_input("Digite o CNPJ (pode ser parte, sem pontos ou traços
 
 if cnpj_input:
     cnpj_limpo = limpar_cnpj(cnpj_input)
+
+    # Busca parcial com contains, ignora NA
     resultado = df_total[df_total["CNPJ_LIMPO"].str.contains(cnpj_limpo, na=False)]
 
     if resultado.empty:
@@ -102,43 +105,11 @@ if cnpj_input:
         st.dataframe(df_total[[coluna_cnpj, 'Planilha', 'Aba']].drop_duplicates())
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
-
-        # Mapeamento de aliases para as colunas que você quer mostrar
-        aliases_colunas = {
-            'CNPJ': ['cnpj'],
-            'Razão Social': ['razão social', 'razao social', 'nome da empresa', 'empresa', 'nome empresa'],
-            'Nome': ['nome', 'nome contato', 'contato'],
-            'Cargo': ['cargo', 'posição', 'posicao', 'função', 'funcao', 'cargo/função'],
-            'E-mail': ['e-mail', 'email', 'e mail'],
-            'telefone': ['telefone', 'tel', 'telefone fixo'],
-            'celular': ['celular', 'telefone celular', 'whatsapp'],
-            'contatos adicionais/ notas': ['contatos adicionais', 'notas', 'observações', 'observacoes', 'comentários', 'comentarios'],
-            'Setor/Área': ['setor', 'área', 'area', 'segmento', 'segmentação']
-        }
-
-        cols_lower = {col.lower(): col for col in resultado.columns}
-        dados_exibicao = pd.DataFrame()
-
-        for col_fixa, possiveis_nomes in aliases_colunas.items():
-            encontrada = False
-            for nome_possivel in possiveis_nomes:
-                if nome_possivel in cols_lower:
-                    dados_exibicao[col_fixa] = resultado[cols_lower[nome_possivel]]
-                    encontrada = True
-                    break
-            if not encontrada:
-                dados_exibicao[col_fixa] = ""
-
-        # Sempre mostra Planilha e Aba
-        dados_exibicao['Planilha'] = resultado['Planilha']
-        dados_exibicao['Aba'] = resultado['Aba']
-
-        colunas_finais = ['CNPJ', 'Razão Social', 'Nome', 'Cargo', 'E-mail',
-                         'telefone', 'celular', 'contatos adicionais/ notas', 'Setor/Área', 'Planilha', 'Aba']
-
-        dados_exibicao = dados_exibicao[colunas_finais]
-
-        st.dataframe(dados_exibicao, use_container_width=True)
+        
+        # MOSTRA AS COLUNAS QUE ESTÃO NO RESULTADO PRA AJUSTAR O MAPEAMENTO DEPOIS
+        st.write("Colunas encontradas na busca:", resultado.columns.tolist())
+        
+        # Aqui você pode continuar seu código para montar a tabela com as colunas que quiser
 
 else:
     st.info("Digite o CNPJ para buscar os contatos.")
