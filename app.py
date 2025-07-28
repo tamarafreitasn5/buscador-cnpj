@@ -2,11 +2,8 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
 import pandas as pd
 import re
-import io
-import tempfile
 
 st.set_page_config(page_title="Consulta por CNPJ", layout="wide")
 st.title("🔍 Consulta de Contatos por CNPJ (Google Drive)")
@@ -39,83 +36,36 @@ def get_folder_id_by_name(folder_name):
     else:
         return None
 
-def list_files_in_folder(folder_id):
-    query = f"'{folder_id}' in parents"
-    results = drive_service.files().list(q=query, fields="files(id, name, mimeType)").execute()
+def list_spreadsheets_in_folder(folder_id):
+    query = f"'{folder_id}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet'"
+    results = drive_service.files().list(q=query, fields="files(id, name)").execute()
     return results.get("files", [])
 
-def download_and_read_file(file_id, filename, mime_type):
-    # Para Google Sheets, exporta para Excel antes de ler
-    if mime_type == 'application/vnd.google-apps.spreadsheet':
-        request = drive_service.files().export_media(fileId=file_id, mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-        fh.seek(0)
-        xls = pd.ExcelFile(fh)
-        dfs = []
-        for sheet_name in xls.sheet_names:
-            df = xls.parse(sheet_name)
-            dfs.append((df, sheet_name))
-        return dfs
-
-    # Para arquivos binários (.xlsx, .csv)
-    else:
-        request = drive_service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-        fh.seek(0)
-        ext = filename.lower().split('.')[-1]
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{ext}') as tmp_file:
-            tmp_file.write(fh.read())
-            tmp_file.flush()
-            if ext in ['xlsx', 'xls']:
-                xls = pd.ExcelFile(tmp_file.name)
-                dfs = []
-                for sheet_name in xls.sheet_names:
-                    df = xls.parse(sheet_name)
-                    dfs.append((df, sheet_name))
-                return dfs
-            elif ext == 'csv':
-                df = pd.read_csv(tmp_file.name, encoding='utf-8', engine='python', sep=None)
-                return [(df, '(única aba)')]
-            else:
-                return []
-
 def carregar_planilhas_google_drive(folder_id):
-    arquivos = list_files_in_folder(folder_id)
+    arquivos = list_spreadsheets_in_folder(folder_id)
     df_total = pd.DataFrame()
     for arquivo in arquivos:
         try:
-            dfs = download_and_read_file(arquivo['id'], arquivo['name'], arquivo['mimeType'])
-            for df, aba in dfs:
-                if df.empty:
+            sh = gc.open_by_key(arquivo['id'])
+            for aba in sh.worksheets():
+                valores = aba.get_all_values()
+                if not valores or len(valores) < 2:
                     continue
-                
-                # Tentar considerar que o header pode estar na 2a linha (index 1) conforme seu script original
-                if len(df) > 1:
-                    df.columns = df.iloc[1]
-                    df = df[2:]
-                else:
-                    df.columns = df.iloc[0]
-                    df = df[1:]
+                header = valores[1]  # Cabeçalho linha 2
+                dados = valores[2:]  # Dados a partir da linha 3
+
+                df = pd.DataFrame(dados, columns=header)
                 
                 df.columns = [str(col).strip() for col in df.columns]
-
+                
                 for c in df.columns:
                     if df[c].dtype == 'object':
                         df[c] = df[c].astype(str).str.strip().replace({'': pd.NA, 'nan': pd.NA})
 
                 df['Planilha'] = arquivo['name']
-                df['Aba'] = aba
+                df['Aba'] = aba.title
 
                 df_total = pd.concat([df_total, df], ignore_index=True)
-
         except Exception as e:
             st.warning(f"Erro ao ler arquivo {arquivo['name']}: {e}")
     return df_total
@@ -157,6 +107,7 @@ if cnpj_input:
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
 
+        # Dicionário com possíveis nomes para cada coluna (com maiúsculas, minúsculas e variantes)
         aliases_colunas = {
             "CNPJ": ["CNPJ", "cnpj", "CNPJ_LIMPO", "cnpj_limpo"],
             "Razão Social": ["Razão Social", "RAZÃO SOCIAL", "razao social", "razaosocial", "empresa", "nomeempresa"],
@@ -173,6 +124,7 @@ if cnpj_input:
 
         dados_exibicao = pd.DataFrame()
 
+        # Pra cada coluna desejada, tenta encontrar uma correspondência exata no resultado.columns e traz os dados
         for nome_col, possiveis_nomes in aliases_colunas.items():
             coluna_encontrada = None
             for nome in possiveis_nomes:
