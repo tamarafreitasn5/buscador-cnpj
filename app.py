@@ -4,6 +4,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import pandas as pd
 import re
+import unidecode
 
 st.set_page_config(page_title="Consulta por CNPJ", layout="wide")
 st.title("🔍 Consulta de Contatos por CNPJ (Google Drive)")
@@ -16,7 +17,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly"
 ]
 
-# AUTENTICAÇÃO usando st.secrets, substituindo o credentials.json
+# AUTENTICAÇÃO usando st.secrets
 service_account_info = st.secrets["google_service_account"]
 creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
 gc = gspread.authorize(creds)
@@ -63,6 +64,10 @@ def carregar_planilhas_google_drive(folder_id):
             st.warning(f"Erro ao ler arquivo {arquivo['name']}: {e}")
     return df_total
 
+def normalizar_coluna(nome):
+    # Remove acentos, deixa minúsculo e tira espaços
+    return unidecode.unidecode(nome.lower().strip().replace(" ", "").replace("_",""))
+
 folder_id = get_folder_id_by_name(FOLDER_NAME)
 
 if folder_id is None:
@@ -85,15 +90,12 @@ if not colunas_possiveis:
 
 coluna_cnpj = st.selectbox("Selecione a coluna que contém o CNPJ:", colunas_possiveis)
 
-# Limpa CNPJ para busca
 df_total["CNPJ_LIMPO"] = df_total[coluna_cnpj].apply(limpar_cnpj)
 
-# Input do usuário
 cnpj_input = st.text_input("Digite o CNPJ (pode ser parte, sem pontos ou traços):")
 
 if cnpj_input:
     cnpj_limpo = limpar_cnpj(cnpj_input)
-
     resultado = df_total[df_total["CNPJ_LIMPO"].str.contains(cnpj_limpo, na=False)]
 
     if resultado.empty:
@@ -104,32 +106,36 @@ if cnpj_input:
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
 
-        # Mapeamento case-insensitive das colunas que queremos mostrar
-        colunas_esperadas = {
-            "cnpj": "CNPJ",
-            "razão social": "Razão Social",
-            "nome": "Nome",
-            "cargo": "Cargo",
-            "e-mail": "E-mail",
-            "telefone": "Telefone",
-            "celular": "Celular",
-            "contatos adicionais/notas": "Contatos adicionais/notas",
-            "setor/área": "Setor/Área",
-            "planilha": "Planilha",
-            "aba": "Aba"
+        # Dicionário de alias para cada coluna desejada
+        aliases_colunas = {
+            "CNPJ": ["cnpj"],
+            "Razão Social": ["razao social", "razão social", "nome da empresa", "empresa", "nomeempresa", "razaosocial"],
+            "Nome": ["nome", "nome contato", "contato", "nomecontato"],
+            "Cargo": ["cargo", "posição", "posicao", "função", "funcao", "cargo/função"],
+            "E-mail": ["e-mail", "email", "e mail"],
+            "Telefone": ["telefone", "tel", "telefonefixo", "telefoneresidencial"],
+            "Celular": ["celular", "telefonecelular", "whatsapp", "cel"],
+            "Contatos adicionais/notas": ["contatos adicionais", "notas", "observacoes", "observações", "comentarios", "comentários", "contatosadicionais", "notas/observações"],
+            "Setor/Área": ["setor", "área", "area", "segmento", "segmentacao", "setor/area"],
+            "Planilha": ["planilha"],
+            "Aba": ["aba"]
         }
 
-        # Dicionário com as colunas reais do dataframe com chave em minúsculo e sem espaços extras
-        cols_map = {col.lower().strip(): col for col in resultado.columns}
+        # Normaliza nomes das colunas do dataframe para facilitar o match
+        cols_norm = {normalizar_coluna(c): c for c in resultado.columns}
 
         dados_exibicao = pd.DataFrame()
 
-        for chave_lower, nome_display in colunas_esperadas.items():
-            col_real = cols_map.get(chave_lower)
-            if col_real:
-                dados_exibicao[nome_display] = resultado[col_real]
-            else:
-                dados_exibicao[nome_display] = ""  # Coluna vazia se não achar
+        for nome_col, lista_alias in aliases_colunas.items():
+            achou = False
+            for alias in lista_alias:
+                alias_norm = normalizar_coluna(alias)
+                if alias_norm in cols_norm:
+                    dados_exibicao[nome_col] = resultado[cols_norm[alias_norm]]
+                    achou = True
+                    break
+            if not achou:
+                dados_exibicao[nome_col] = ""  # se não achar a coluna, cria vazia
 
         st.dataframe(dados_exibicao, use_container_width=True)
 
