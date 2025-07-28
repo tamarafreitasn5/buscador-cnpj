@@ -106,21 +106,48 @@ if cnpj_input:
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
         
-        colunas_desejadas = [
-            'CNPJ', 'Razão Social', 'Nome', 'Cargo', 'E-mail',
-            'telefone', 'celular', 'contatos adicionais/ notas', 'Planilha', 'Aba'
-        ]
-        
+        aliases_colunas = {
+            'CNPJ': ['cnpj'],
+            'Razão Social': ['razão social', 'razao social', 'nome da empresa', 'empresa', 'nome empresa'],
+            'Nome': ['nome', 'nome contato', 'contato'],
+            'Cargo': ['cargo', 'posição', 'posicao', 'função', 'funcao', 'cargo/função'],
+            'E-mail': ['e-mail', 'email', 'e mail'],
+            'telefone': ['telefone', 'tel', 'telefone fixo'],
+            'celular': ['celular', 'telefone celular', 'whatsapp'],
+            'contatos adicionais/ notas': ['contatos adicionais', 'notas', 'observações', 'observacoes', 'comentários', 'comentarios'],
+            'Setor/Área': ['setor', 'área', 'area', 'segmento', 'segmentação']
+        }
+
         cols_lower = {col.lower(): col for col in resultado.columns}
-        
+
         dados_exibicao = pd.DataFrame()
-        for col in colunas_desejadas:
-            chave = col.lower()
-            if chave in cols_lower:
-                dados_exibicao[col] = resultado[cols_lower[chave]]
+
+        for col_fixa, possiveis_nomes in aliases_colunas.items():
+            encontrada = False
+            for nome_possivel in possiveis_nomes:
+                for col_existente in cols_lower:
+                    if nome_possivel == col_existente:
+                        dados_exibicao[col_fixa] = resultado[cols_lower[col_existente]]
+                        encontrada = True
+                        break
+                if encontrada:
+                    break
+            if not encontrada:
+                dados_exibicao[col_fixa] = ""  # cria coluna vazia se não achou
+
+        # Planilha e Aba já estão no resultado, mas vamos garantir
+        for col in ['Planilha', 'Aba']:
+            if col in resultado.columns:
+                dados_exibicao[col] = resultado[col]
             else:
                 dados_exibicao[col] = ""
-                
+
+        # Ordem final das colunas, Planilha e Aba sempre no final
+        colunas_finais = ['CNPJ', 'Razão Social', 'Nome', 'Cargo', 'E-mail',
+                         'telefone', 'celular', 'contatos adicionais/ notas', 'Setor/Área', 'Planilha', 'Aba']
+
+        dados_exibicao = dados_exibicao[colunas_finais]
+
         st.dataframe(dados_exibicao, use_container_width=True)
 else:
     st.info("Digite o CNPJ para buscar os contatos.")
