@@ -105,6 +105,22 @@ if cnpj_input:
         st.dataframe(df_total[[coluna_cnpj, 'Planilha', 'Aba']].drop_duplicates())
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
-        st.dataframe(resultado.drop(columns=["CNPJ_LIMPO"]), use_container_width=True)
+        
+        colunas_desejadas = [
+            'CNPJ', 'Razão Social', 'Nome', 'Cargo', 'E-mail',
+            'telefone', 'celular', 'contatos adicionais/ notas', 'Planilha', 'Aba'
+        ]
+        
+        cols_lower = {col.lower(): col for col in resultado.columns}
+        
+        dados_exibicao = pd.DataFrame()
+        for col in colunas_desejadas:
+            chave = col.lower()
+            if chave in cols_lower:
+                dados_exibicao[col] = resultado[cols_lower[chave]]
+            else:
+                dados_exibicao[col] = ""
+                
+        st.dataframe(dados_exibicao, use_container_width=True)
 else:
     st.info("Digite o CNPJ para buscar os contatos.")
