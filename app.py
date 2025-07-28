@@ -55,10 +55,12 @@ def carregar_planilhas_google_drive(folder_id):
                 dados = valores[2:]  # Dados a partir da linha 3
 
                 df = pd.DataFrame(dados, columns=header)
-                
+
+                # Deixar colunas únicas para evitar erro de colunas duplicadas
+                df.columns = pd.io.parsers.ParserBase({'names': df.columns})._maybe_dedup_names(df.columns)
+
                 df.columns = [str(col).strip() for col in df.columns]
-                
-                # Correção aqui para evitar erro com dtype em DataFrames aninhados
+
                 for c in df.columns:
                     if isinstance(df[c], pd.Series) and df[c].dtype == 'object':
                         df[c] = df[c].astype(str).str.strip().replace({'': pd.NA, 'nan': pd.NA})
