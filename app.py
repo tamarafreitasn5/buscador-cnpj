@@ -56,7 +56,12 @@ def carregar_planilhas_google_drive(folder_id):
                 header = valores[1]
                 dados = valores[2:]  # dados a partir da linha 3
                 df = pd.DataFrame(dados, columns=header)
+                # Limpa espaços das colunas
                 df.columns = [str(col).strip() for col in df.columns]
+                # Limpa espaços nas células de texto
+                for c in df.columns:
+                    if df[c].dtype == 'object':
+                        df[c] = df[c].str.strip()
                 df['Planilha'] = arquivo['name']
                 df['Aba'] = aba.title
                 df_total = pd.concat([df_total, df], ignore_index=True)
@@ -65,7 +70,7 @@ def carregar_planilhas_google_drive(folder_id):
     return df_total
 
 def normalizar_coluna(nome):
-    # Remove acentos, deixa minúsculo e tira espaços
+    # Remove acentos, deixa minúsculo e tira espaços e _
     return unidecode.unidecode(nome.lower().strip().replace(" ", "").replace("_",""))
 
 folder_id = get_folder_id_by_name(FOLDER_NAME)
@@ -82,7 +87,11 @@ if df_total.empty:
     st.warning("Nenhuma planilha válida encontrada na pasta.")
     st.stop()
 
-# Seleciona coluna que contém CNPJ (mantido exatamente igual)
+# Mostrar as colunas detectadas para depuração
+st.write("Colunas detectadas nas planilhas:")
+st.write(df_total.columns.tolist())
+
+# Seleciona coluna que contém CNPJ (mantido igual)
 colunas_possiveis = [col for col in df_total.columns if 'cnpj' in col.lower()]
 if not colunas_possiveis:
     st.error("Nenhuma coluna com CNPJ encontrada nas planilhas.")
@@ -106,10 +115,9 @@ if cnpj_input:
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
 
-        # Dicionário atualizado com TODAS as variações que você passou:
         aliases_colunas = {
             "CNPJ": ["cnpj", "cnpj_limpo"],
-            "Razão Social": ["razao social", "razão social", "razaosocial", "razão_social", "razao_social", "RAZÃO SOCIAL", "RAZÃO_SOCIAL", "RAZAO SOCIAL", "razao social", "razao_social", "razao social"],
+            "Razão Social": ["razao social", "razão social", "razaosocial", "razao_social", "razão_social", "razão social", "RAZÃO SOCIAL", "RAZAO SOCIAL", "RAZÃO_SOCIAL"],
             "Nome": ["nome", "nome contato", "contato", "nomecontato", "NOME"],
             "Cargo": ["cargo", "posição", "posicao", "função", "funcao", "cargo/função", "CARGO"],
             "E-mail": ["e-mail", "email", "e mail", "E-MAIL", "EMAIL"],
@@ -121,7 +129,6 @@ if cnpj_input:
             "Aba": ["aba"]
         }
 
-        # Normaliza nomes das colunas do dataframe para facilitar o match
         cols_norm = {normalizar_coluna(c): c for c in resultado.columns}
 
         dados_exibicao = pd.DataFrame()
@@ -130,12 +137,19 @@ if cnpj_input:
             achou = False
             for alias in lista_alias:
                 alias_norm = normalizar_coluna(alias)
-                if alias_norm in cols_norm:
-                    dados_exibicao[nome_col] = resultado[cols_norm[alias_norm]]
-                    achou = True
+                # Busca alias dentro do nome da coluna normalizada
+                for col_norm, col_original in cols_norm.items():
+                    if alias_norm in col_norm:
+                        dados_exibicao[nome_col] = resultado[col_original].astype(str)
+                        achou = True
+                        break
+                if achou:
                     break
             if not achou:
-                dados_exibicao[nome_col] = ""  # cria coluna vazia se não achar
+                dados_exibicao[nome_col] = ""
+                st.warning(f"Coluna para '{nome_col}' não encontrada. Procurado aliases: {lista_alias}")
+            else:
+                st.write(f"Coluna para '{nome_col}' encontrada.")
 
         st.dataframe(dados_exibicao, use_container_width=True)
 
