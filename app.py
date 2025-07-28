@@ -54,7 +54,6 @@ def carregar_planilhas_google_drive(folder_id):
                 # Cabeçalho na linha 2 (index 1)
                 header = valores[1]
                 dados = valores[2:]  # dados a partir da linha 3
-                # Monta DataFrame
                 df = pd.DataFrame(dados, columns=header)
                 df.columns = [str(col).strip() for col in df.columns]
                 df['Planilha'] = arquivo['name']
@@ -95,7 +94,6 @@ cnpj_input = st.text_input("Digite o CNPJ (pode ser parte, sem pontos ou traços
 if cnpj_input:
     cnpj_limpo = limpar_cnpj(cnpj_input)
 
-    # Busca parcial com contains, ignora NA
     resultado = df_total[df_total["CNPJ_LIMPO"].str.contains(cnpj_limpo, na=False)]
 
     if resultado.empty:
@@ -105,11 +103,35 @@ if cnpj_input:
         st.dataframe(df_total[[coluna_cnpj, 'Planilha', 'Aba']].drop_duplicates())
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
-        
-        # MOSTRA AS COLUNAS QUE ESTÃO NO RESULTADO PRA AJUSTAR O MAPEAMENTO DEPOIS
-        st.write("Colunas encontradas na busca:", resultado.columns.tolist())
-        
-        # Aqui você pode continuar seu código para montar a tabela com as colunas que quiser
+
+        # Mapeamento case-insensitive das colunas que queremos mostrar
+        colunas_esperadas = {
+            "cnpj": "CNPJ",
+            "razão social": "Razão Social",
+            "nome": "Nome",
+            "cargo": "Cargo",
+            "e-mail": "E-mail",
+            "telefone": "Telefone",
+            "celular": "Celular",
+            "contatos adicionais/notas": "Contatos adicionais/notas",
+            "setor/área": "Setor/Área",
+            "planilha": "Planilha",
+            "aba": "Aba"
+        }
+
+        # Dicionário com as colunas reais do dataframe com chave em minúsculo e sem espaços extras
+        cols_map = {col.lower().strip(): col for col in resultado.columns}
+
+        dados_exibicao = pd.DataFrame()
+
+        for chave_lower, nome_display in colunas_esperadas.items():
+            col_real = cols_map.get(chave_lower)
+            if col_real:
+                dados_exibicao[nome_display] = resultado[col_real]
+            else:
+                dados_exibicao[nome_display] = ""  # Coluna vazia se não achar
+
+        st.dataframe(dados_exibicao, use_container_width=True)
 
 else:
     st.info("Digite o CNPJ para buscar os contatos.")
