@@ -1,83 +1,73 @@
 import streamlit as st
 import pandas as pd
 import os
-import re
 
-# Mapeamento de nomes de colunas para padronização
-aliases_colunas = {
-    "cnpj": ["cnpj", "CNPJ"],
-    "razao_social": ["razão social", "razao social", "empresa"],
-    "nome": ["nome", "contato", "nome completo", "nome do contato"],
-    "cargo": ["cargo", "posição", "função"],
-    "email": ["e-mail", "email", "mail"],
-    "telefone": ["telefone", "tel", "telefone fixo"],
-    "celular": ["celular", "telefone celular", "whatsapp"],
-    "notas": ["notas", "observações", "comentários", "anotações", "contatos adicionais"],
-    "setor": ["setor", "segmento", "ramo", "área"]
-}
-
+# Função para padronizar os nomes das colunas
 def padronizar_colunas(df):
-    colunas_novas = {}
-    for nova_col, aliases in aliases_colunas.items():
-        for alias in aliases:
-            for col in df.columns:
-                if alias.lower() in str(col).lower():
-                    colunas_novas[col] = nova_col
-                    break
-    return df.rename(columns=colunas_novas)
+    aliases_colunas = {
+        'cnpj': 'CNPJ',
+        'razão social': 'Razão Social',
+        'nome': 'Nome',
+        'cargo': 'Cargo',
+        'email': 'E-mail',
+        'telefone': 'Telefone',
+        'celular': 'Celular',
+        'contato adicional': 'Contatos adicionais/Notas',
+        'setor': 'Setor/Área',
+        'área': 'Setor/Área',
+        'notas': 'Contatos adicionais/Notas'
+    }
 
-def processar_arquivo(path):
-    if path.endswith(".csv"):
-        df = pd.read_csv(path, encoding="utf-8", sep=None, engine="python")
-    else:
-        df = pd.read_excel(path, sheet_name=None)
+    colunas_novas = {}
+    for col in df.columns:
+        nome_original = col
+        col = col.strip().lower()
+        for chave, padrao in aliases_colunas.items():
+            if chave in col:
+                colunas_novas[nome_original] = padrao
+                break
+    df = df.rename(columns=colunas_novas)
     return df
 
-def buscar_cnpj_em_df(df, cnpj_input):
-    padronizado = padronizar_colunas(df)
-    if "cnpj" not in padronizado.columns:
-        return pd.DataFrame()
-    padronizado["cnpj"] = padronizado["cnpj"].astype(str).str.replace(r'\D', '', regex=True)
-    cnpj_limpo = re.sub(r'\D', '', cnpj_input)
-    return padronizado[padronizado["cnpj"].str.contains(cnpj_limpo, na=False)]
+# Interface
+st.markdown("### 🔎 Buscador por CNPJ")
+folder_path = st.text_input("📁 Caminho da pasta com os arquivos (Excel ou CSV):")
+cnpj_input = st.text_input("🔍 Digite o CNPJ para buscar:")
 
-def main():
-    st.title("🔎 Buscador por CNPJ")
-    pasta = st.text_input("📁 Caminho da pasta com os arquivos (Excel ou CSV):")
+if folder_path and cnpj_input:
+    resultados = []
+    for file_name in os.listdir(folder_path):
+        if file_name.endswith((".xlsx", ".csv")) and not file_name.startswith("~$"):
+            file_path = os.path.join(folder_path, file_name)
+            try:
+                if file_name.endswith(".csv"):
+                    df_all = pd.read_csv(file_path, encoding='utf-8', sep=None, engine='python')
+                    df_all = padronizar_colunas(df_all)
+                    df_all["Planilha"] = file_name
+                    df_all["Aba"] = "-"
+                    df_filtrado = df_all[df_all.apply(lambda row: row.astype(str).str.contains(cnpj_input).any(), axis=1)]
+                    if not df_filtrado.empty:
+                        resultados.append(df_filtrado)
+                else:
+                    xls = pd.ExcelFile(file_path)
+                    for aba in xls.sheet_names:
+                        df = xls.parse(aba)
+                        df = padronizar_colunas(df)
+                        df["Planilha"] = file_name
+                        df["Aba"] = aba
+                        df_filtrado = df[df.apply(lambda row: row.astype(str).str.contains(cnpj_input).any(), axis=1)]
+                        if not df_filtrado.empty:
+                            resultados.append(df_filtrado)
+            except Exception as e:
+                st.warning(f"Erro ao ler {file_name}: {e}")
 
-    cnpj_input = st.text_input("🔍 Digite o CNPJ para buscar:")
-    if st.button("Buscar") and pasta and cnpj_input:
-        resultados = []
-        for nome_arquivo in os.listdir(pasta):
-            caminho_completo = os.path.join(pasta, nome_arquivo)
-            if not (nome_arquivo.endswith(".xlsx") or nome_arquivo.endswith(".csv")):
-                continue
-
-            dados = processar_arquivo(caminho_completo)
-            if isinstance(dados, dict):  # Excel com várias abas
-                for aba, df in dados.items():
-                    resultado = buscar_cnpj_em_df(df, cnpj_input)
-                    if not resultado.empty:
-                        resultado["Planilha"] = nome_arquivo
-                        resultado["Aba"] = aba
-                        resultados.append(resultado)
-            else:  # CSV
-                resultado = buscar_cnpj_em_df(dados, cnpj_input)
-                if not resultado.empty:
-                    resultado["Planilha"] = nome_arquivo
-                    resultado["Aba"] = "Única (CSV)"
-                    resultados.append(resultado)
-
-        if resultados:
-            final = pd.concat(resultados, ignore_index=True)
-            colunas_finais = [
-                "cnpj", "razao_social", "nome", "cargo", "email",
-                "telefone", "celular", "notas", "setor", "Planilha", "Aba"
-            ]
-            colunas_existentes = [col for col in colunas_finais if col in final.columns]
-            st.dataframe(final[colunas_existentes])
-        else:
-            st.warning("Nenhum resultado encontrado para o CNPJ informado.")
-
-if __name__ == "__main__":
-    main()
+    if resultados:
+        df_resultado = pd.concat(resultados, ignore_index=True)
+        colunas_desejadas = ['CNPJ', 'Razão Social', 'Nome', 'Cargo', 'E-mail', 'Telefone', 'Celular',
+                             'Contatos adicionais/Notas', 'Setor/Área', 'Planilha', 'Aba']
+        colunas_presentes = [col for col in colunas_desejadas if col in df_resultado.columns]
+        df_resultado = df_resultado[colunas_presentes]
+        st.success(f"{len(df_resultado)} resultado(s) encontrado(s).")
+        st.dataframe(df_resultado)
+    else:
+        st.error("Nenhum resultado encontrado.")
