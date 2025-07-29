@@ -5,102 +5,110 @@ import re
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-from io import BytesIO
+import io
+import tempfile
+import zipfile
 
-# ID da pasta no Google Drive
-FOLDER_ID = "1On7gASIN3FhwS9AVowPlpA9Xv7VV7XG1"
+# Nome da pasta no Google Drive
+FOLDER_NAME = 'Base teste'
 
-# Autenticação com credentials.json
-creds = service_account.Credentials.from_service_account_file(
-    "credentials.json",
-    scopes=["https://www.googleapis.com/auth/drive"]
-)
-service = build("drive", "v3", credentials=creds)
+# Autenticação com o Google Drive
+def authenticate_gdrive():
+    creds_dict = st.secrets["gcp_service_account"]
+    credentials = service_account.Credentials.from_service_account_info(creds_dict)
+    service = build('drive', 'v3', credentials=credentials)
+    return service
 
-# Nome original das colunas padronizadas
-aliases_colunas = {
-    "CNPJ": "CNPJ",
-    "Razão Social": "Razão Social",
-    "Nome": "Nome",
-    "Cargo": "Cargo",
-    "E-mail": "E-mail",
-    "telefone": "Telefone",
-    "celular": "Celular",
-    "contatos adicionais/notas": "Notas",
-    "Setor/Área": "Setor/Área"
-}
+# Obtém o ID da pasta pelo nome
+def get_folder_id_by_name(folder_name, service):
+    results = service.files().list(q=f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder'",
+                                   spaces='drive', fields='files(id, name)').execute()
+    folders = results.get('files', [])
+    if not folders:
+        st.error(f"Pasta '{folder_name}' não encontrada.")
+        return None
+    return folders[0]['id']
 
-def listar_arquivos_na_pasta(folder_id):
-    query = f"'{folder_id}' in parents and trashed = false"
-    results = service.files().list(q=query, fields="files(id, name)").execute()
-    return results.get("files", [])
+# Lista os arquivos dentro da pasta
+def list_files_in_folder(folder_id, service):
+    query = f"'{folder_id}' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'"
+    results = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+    return results.get('files', [])
 
-def baixar_arquivo(file_id):
+# Baixa um arquivo e retorna o caminho temporário
+def download_file(file_id, service):
     request = service.files().get_media(fileId=file_id)
-    fh = BytesIO()
+    fh = io.BytesIO()
     downloader = MediaIoBaseDownload(fh, request)
     done = False
     while not done:
         status, done = downloader.next_chunk()
     fh.seek(0)
-    return fh
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    temp_file.write(fh.read())
+    temp_file.close()
+    return temp_file.name
 
-def normalizar_colunas(df):
-    df.columns = [col.strip() for col in df.columns]
-    novas_colunas = {}
-    for col in df.columns:
-        for alias, padrao in aliases_colunas.items():
-            if re.search(alias, col, re.IGNORECASE):
-                novas_colunas[col] = padrao
-    return df.rename(columns=novas_colunas)
+# Padroniza os nomes de colunas
+def padronizar_colunas(df):
+    df.columns = [str(col).strip() for col in df.columns]
+    return df
 
-@st.cache_data
-def carregar_dados():
-    arquivos = listar_arquivos_na_pasta(FOLDER_ID)
-    todos_dados = []
-    
-    for arquivo in arquivos:
-        nome_arquivo = arquivo["name"]
-        file_id = arquivo["id"]
-        if nome_arquivo.endswith(".xlsx") or nome_arquivo.endswith(".csv"):
-            try:
-                conteudo = baixar_arquivo(file_id)
-                if nome_arquivo.endswith(".xlsx"):
-                    xls = pd.ExcelFile(conteudo)
-                    for aba in xls.sheet_names:
-                        df = xls.parse(aba)
-                        df = normalizar_colunas(df)
-                        df["Planilha"] = nome_arquivo
-                        df["Aba"] = aba
-                        todos_dados.append(df)
-                elif nome_arquivo.endswith(".csv"):
-                    df = pd.read_csv(conteudo, encoding='utf-8', sep=None, engine='python')
-                    df = normalizar_colunas(df)
-                    df["Planilha"] = nome_arquivo
-                    df["Aba"] = "Arquivo CSV"
-                    todos_dados.append(df)
-            except Exception as e:
-                st.warning(f"Erro ao processar {nome_arquivo}: {e}")
-    if todos_dados:
-        return pd.concat(todos_dados, ignore_index=True)
+# Busca dados por CNPJ
+def buscar_por_cnpj(cnpj, arquivos):
+    resultados = []
+
+    for file_name, file_path in arquivos.items():
+        try:
+            xls = pd.ExcelFile(file_path)
+            for aba in xls.sheet_names:
+                df = pd.read_excel(xls, sheet_name=aba)
+                df = padronizar_colunas(df)
+                cnpj_cols = [col for col in df.columns if 'cnpj' in col.lower()]
+                if not cnpj_cols:
+                    continue
+                for col in cnpj_cols:
+                    encontrados = df[df[col].astype(str).str.replace(r'\D', '', regex=True) == cnpj]
+                    if not encontrados.empty:
+                        encontrados['Planilha'] = file_name
+                        encontrados['Aba'] = aba
+                        resultados.append(encontrados)
+        except Exception as e:
+            st.warning(f"Erro ao processar {file_name}: {e}")
+
+    if resultados:
+        return pd.concat(resultados, ignore_index=True)
     else:
         return pd.DataFrame()
 
-st.set_page_config(page_title="Buscador por CNPJ", page_icon="🔎")
-st.title("🔎 Buscador por CNPJ")
+# Interface Streamlit
+def main():
+    st.title("🔍 Buscador de CNPJ em Planilhas do Google Drive")
 
-cnpj_input = st.text_input("Digite o CNPJ para buscar:")
+    cnpj_input = st.text_input("Digite o CNPJ (apenas números):")
+    if not cnpj_input:
+        st.stop()
 
-if cnpj_input:
-    cnpj = re.sub(r'\D', '', cnpj_input)  # remove pontuação
-    df = carregar_dados()
-    if "CNPJ" in df.columns:
-        resultados = df[df["CNPJ"].astype(str).str.contains(cnpj)]
-        if not resultados.empty:
-            colunas_ordenadas = ["CNPJ", "Razão Social", "Nome", "Cargo", "E-mail", "Telefone", "Celular", "Notas", "Setor/Área", "Planilha", "Aba"]
-            colunas_disponiveis = [col for col in colunas_ordenadas if col in resultados.columns]
-            st.write(resultados[colunas_disponiveis])
-        else:
-            st.info("Nenhum resultado encontrado para o CNPJ informado.")
+    cnpj_input = re.sub(r'\D', '', cnpj_input)
+
+    service = authenticate_gdrive()
+    folder_id = get_folder_id_by_name(FOLDER_NAME, service)
+    if not folder_id:
+        st.stop()
+
+    files = list_files_in_folder(folder_id, service)
+    arquivos = {}
+    for file in files:
+        file_path = download_file(file['id'], service)
+        arquivos[file['name']] = file_path
+
+    resultado = buscar_por_cnpj(cnpj_input, arquivos)
+
+    if not resultado.empty:
+        st.success(f"✅ {len(resultado)} resultado(s) encontrado(s).")
+        st.dataframe(resultado)
     else:
-        st.error("Coluna 'CNPJ' não encontrada em nenhuma planilha.")
+        st.info("Nenhum resultado encontrado para o CNPJ informado.")
+
+if __name__ == "__main__":
+    main()
