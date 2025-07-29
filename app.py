@@ -16,7 +16,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly"
 ]
 
-# AUTENTICAÇÃO usando st.secrets (igual ao que você tinha)
+# AUTENTICAÇÃO usando st.secrets
 service_account_info = st.secrets["google_service_account"]
 creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
 gc = gspread.authorize(creds)
@@ -107,6 +107,7 @@ if cnpj_input:
     else:
         st.success(f"🎯 {len(resultado)} contato(s) encontrado(s).")
 
+        # Dicionário com possíveis nomes para cada coluna (com maiúsculas, minúsculas e variantes)
         aliases_colunas = {
             "CNPJ": ["CNPJ", "cnpj", "CNPJ_LIMPO", "cnpj_limpo"],
             "Razão Social": ["Razão Social", "RAZÃO SOCIAL", "razao social", "razaosocial", "empresa", "nomeempresa"],
@@ -123,6 +124,7 @@ if cnpj_input:
 
         dados_exibicao = pd.DataFrame()
 
+        # Pra cada coluna desejada, tenta encontrar uma correspondência exata no resultado.columns e traz os dados
         for nome_col, possiveis_nomes in aliases_colunas.items():
             coluna_encontrada = None
             for nome in possiveis_nomes:
@@ -135,5 +137,6 @@ if cnpj_input:
                 dados_exibicao[nome_col] = ""
 
         st.dataframe(dados_exibicao, use_container_width=True)
+
 else:
     st.info("Digite o CNPJ para buscar os contatos.")
